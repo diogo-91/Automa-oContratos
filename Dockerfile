@@ -24,7 +24,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY ecosystem.config.js ./
 COPY templates/ ./templates/
-COPY credentials/.gitkeep ./credentials/
+COPY credentials/ ./credentials/
 
 # Cria diretórios de runtime
 RUN mkdir -p logs temp contracts proposals
