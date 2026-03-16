@@ -1,0 +1,14 @@
+# Garante LF para scripts shell (necessário para execução em containers Linux)
+*.sh text eol=lf
+
+# Texto normal
+*.ts text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+
+# Binários
+*.docx binary
