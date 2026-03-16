@@ -35,37 +35,20 @@ function isClientDataFile(mimeType: string, name: string): boolean {
 // ─── Auth: Service Account (leitura/listagem) ─────────────────────────────────
 
 function getDriveClient(): drive_v3.Drive {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let auth: any;
+  const credentialsPath =
+    process.env.GOOGLE_SERVICE_ACCOUNT_PATH ?? './credentials/google-service-account.json';
 
-  const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64;
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-
-  if (b64 || raw) {
-    const json = b64
-      ? Buffer.from(b64, 'base64').toString('utf-8')
-      : raw!;
-    const credentials = JSON.parse(json);
-    auth = new google.auth.GoogleAuth({
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/drive'],
-    });
-  } else {
-    const credentialsPath =
-      process.env.GOOGLE_SERVICE_ACCOUNT_PATH ?? './credentials/google-service-account.json';
-
-    if (!fs.existsSync(credentialsPath)) {
-      throw new Error(
-        `Credencial Google não encontrada em: ${credentialsPath}\n` +
-        `Defina GOOGLE_SERVICE_ACCOUNT_PATH no .env`,
-      );
-    }
-
-    auth = new google.auth.GoogleAuth({
-      keyFile: credentialsPath,
-      scopes: ['https://www.googleapis.com/auth/drive'],
-    });
+  if (!fs.existsSync(credentialsPath)) {
+    throw new Error(
+      `Credencial Google não encontrada em: ${credentialsPath}\n` +
+      `Defina GOOGLE_SERVICE_ACCOUNT_PATH no .env`,
+    );
   }
+
+  const auth = new google.auth.GoogleAuth({
+    keyFile: credentialsPath,
+    scopes: ['https://www.googleapis.com/auth/drive'],
+  });
 
   return google.drive({ version: 'v3', auth });
 }

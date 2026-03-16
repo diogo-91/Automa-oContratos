@@ -8,6 +8,6 @@ temp/*
 proposals/
 contracts/
 
-# Google Service Account / OAuth tokens
-credentials/*.json
+# Google OAuth token (gerado localmente)
+credentials/google-oauth-token.json
 
