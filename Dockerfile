@@ -16,6 +16,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Instala LibreOffice para conversão docx → pdf
+RUN apk add --no-cache libreoffice openjdk11-jre font-liberation
+
 # Instala apenas dependências de produção
 COPY package*.json ./
 RUN npm ci --omit=dev
