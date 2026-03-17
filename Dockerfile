@@ -28,9 +28,10 @@ COPY --from=builder /app/dist ./dist
 COPY ecosystem.config.js ./
 COPY templates/ ./templates/
 COPY credentials/ ./credentials/
+COPY public/ ./public/
 
 # Cria diretórios de runtime
-RUN mkdir -p logs temp contracts proposals
+RUN mkdir -p logs temp contracts proposals data
 
 # Entrypoint que injeta as credenciais via variável de ambiente
 COPY docker-entrypoint.sh ./
