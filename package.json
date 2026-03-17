@@ -11,7 +11,9 @@
     "stop": "pm2 stop contract-automation",
     "logs": "pm2 logs contract-automation",
     "typecheck": "tsc --noEmit",
-    "authorize-drive": "tsx scripts/authorize-google-drive.ts"
+    "authorize-drive": "tsx scripts/authorize-google-drive.ts",
+    "migrate-logs": "tsx scripts/migrate-from-logs.ts",
+    "migrate-logs:dry": "tsx scripts/migrate-from-logs.ts --dry-run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
