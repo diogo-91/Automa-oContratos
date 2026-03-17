@@ -7,6 +7,12 @@ temp/*
 !temp/.gitkeep
 proposals/
 contracts/
+templates/*
+!templates/.gitkeep
+
+# Banco de dados SQLite (gerado em runtime)
+data/*
+!data/.gitkeep
 
 # Google OAuth token (gerado localmente)
 credentials/google-oauth-token.json

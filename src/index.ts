@@ -5,11 +5,13 @@ import { logger }              from './logger';
 import { startDriveWatcher }  from './watcher/googledrive.watcher';
 import { downloadTemplate }   from './services/googledrive.service';
 import { processarContrato }  from './workflows/contract.workflow';
+import { startApiServer }     from './api/server';
+import { getDb }              from './db/database';
 import type { DriveFileWatcherEvent } from './types';
 
 // ─── Garantir pastas locais ───────────────────────────────────────────────────
 
-for (const dir of ['./contracts', './templates', './temp', './logs']) {
+for (const dir of ['./contracts', './templates', './temp', './logs', './data', './public']) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
@@ -28,6 +30,15 @@ function printBanner(): void {
 
 async function bootstrap(): Promise<void> {
   printBanner();
+
+  // 0. Inicializa banco de dados e inicia servidor do dashboard
+  try {
+    getDb(); // inicializa schema SQLite
+    startApiServer();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`[main] Dashboard não iniciado: ${msg}`);
+  }
 
   // 1. Baixa o template Contrato_ECL.docx do Drive na inicialização
   logger.info('[main] Baixando template do Google Drive...');
