@@ -1,10 +1,47 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import axios from 'axios';
 import { getDb } from '../db/database';
 import { logger } from '../logger';
 
 const PORT = Number(process.env.DASHBOARD_PORT ?? 3001);
+
+// ─── Basic Auth middleware ────────────────────────────────────────────────────
+
+/**
+ * Proteção via HTTP Basic Auth.
+ * Se DASHBOARD_USER e DASHBOARD_PASSWORD não estiverem definidos no .env,
+ * o acesso é liberado (útil em dev local sem exposição de rede).
+ * Em produção, SEMPRE defina as duas variáveis.
+ */
+function basicAuth(req: Request, res: Response, next: NextFunction): void {
+  const user = process.env.DASHBOARD_USER;
+  const pass = process.env.DASHBOARD_PASSWORD;
+
+  // Sem credenciais configuradas → modo dev (avisa no log na inicialização)
+  if (!user || !pass) { next(); return; }
+
+  const authHeader = req.headers.authorization ?? '';
+
+  if (!authHeader.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Contract Automation Dashboard"');
+    res.status(401).send('Autenticação necessária.');
+    return;
+  }
+
+  const decoded    = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
+  const colonIdx   = decoded.indexOf(':');
+  const username   = decoded.slice(0, colonIdx);
+  const password   = decoded.slice(colonIdx + 1);
+
+  if (username === user && password === pass) {
+    next();
+  } else {
+    logger.warn(`[dashboard] Tentativa de login inválida — IP: ${req.ip}`);
+    res.setHeader('WWW-Authenticate', 'Basic realm="Contract Automation Dashboard"');
+    res.status(401).send('Credenciais inválidas.');
+  }
+}
 
 // ─── Types auxiliares ─────────────────────────────────────────────────────────
 
@@ -35,6 +72,9 @@ function safeQuery<T>(
 export function startApiServer(): void {
   const app = express();
   app.use(express.json());
+
+  // ── Autenticação em todas as rotas ──────────────────────────────────────────
+  app.use(basicAuth);
 
   // Serve dashboard HTML
   app.use(express.static(path.join(process.cwd(), 'public')));
