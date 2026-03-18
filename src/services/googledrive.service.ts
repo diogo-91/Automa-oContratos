@@ -85,7 +85,8 @@ function getOAuthDriveClient(): drive_v3.Drive | null {
   }
 
   const tokens      = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
-  const oauthClient = new google.auth.OAuth2(clientId, clientSecret, 'http://localhost:3000/oauth/callback');
+  const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI ?? 'http://localhost:3000/oauth/callback';
+  const oauthClient = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
   oauthClient.setCredentials(tokens);
 
   // Persiste novos tokens automaticamente quando o access_token for renovado

@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
+import fs from 'fs';
 import axios from 'axios';
+import { google } from 'googleapis';
 import { getDb } from '../db/database';
 import { logger } from '../logger';
 
@@ -72,6 +74,54 @@ function safeQuery<T>(
 export function startApiServer(): void {
   const app = express();
   app.use(express.json());
+
+  // ── OAuth2 Google Drive (sem Basic Auth — callback vem do Google) ───────────
+
+  app.get('/auth/google', (_req: Request, res: Response) => {
+    const clientId     = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    const redirectUri  = process.env.GOOGLE_OAUTH_REDIRECT_URI;
+
+    if (!clientId || !clientSecret || !redirectUri) {
+      res.status(500).send('GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET e GOOGLE_OAUTH_REDIRECT_URI precisam estar configurados no .env');
+      return;
+    }
+
+    const oauthClient = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+    const url = oauthClient.generateAuthUrl({
+      access_type: 'offline',
+      prompt:      'consent',
+      scope:       ['https://www.googleapis.com/auth/drive'],
+    });
+
+    res.redirect(url);
+  });
+
+  app.get('/auth/google/callback', async (req: Request, res: Response) => {
+    const clientId     = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    const redirectUri  = process.env.GOOGLE_OAUTH_REDIRECT_URI;
+    const tokenPath    = process.env.GOOGLE_OAUTH_TOKEN_PATH ?? './credentials/google-oauth-token.json';
+    const code         = req.query.code as string | undefined;
+
+    if (!code) {
+      res.status(400).send('Código de autorização ausente.');
+      return;
+    }
+
+    try {
+      const oauthClient = new google.auth.OAuth2(clientId!, clientSecret!, redirectUri!);
+      const { tokens }  = await oauthClient.getToken(code);
+      fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+      fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2));
+      logger.info('[auth] Token OAuth2 do Google Drive salvo com sucesso.');
+      res.send('<h2>✅ Google Drive autorizado com sucesso!</h2><p>Pode fechar esta aba. O sistema já está usando sua conta para upload.</p>');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`[auth] Erro ao trocar código por token: ${msg}`);
+      res.status(500).send(`Erro ao autorizar: ${msg}`);
+    }
+  });
 
   // ── Autenticação em todas as rotas ──────────────────────────────────────────
   app.use(basicAuth);
