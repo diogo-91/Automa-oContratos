@@ -4,7 +4,7 @@ import fs from 'fs';
 import { logger } from '../logger';
 import {
   listarPastasClientes,
-  downloadArquivo,
+  exportPropostaComoPdf,
   exportArquivoComoTexto,
   marcarPastaComoProcessando,
 } from '../services/googledrive.service';
@@ -64,10 +64,14 @@ export function startDriveWatcher(): EventEmitter {
           const clientTempDir = path.join(TEMP_DIR, pasta.folderId);
           fs.mkdirSync(clientTempDir, { recursive: true });
 
-          // Download da proposta (PDF)
-          const pdfPath = path.join(clientTempDir, pasta.pdfFileName!);
+          // Download da proposta (converte para PDF se necessário)
           logger.info(`[drive-watcher] Baixando proposta: ${pasta.pdfFileName}`);
-          await downloadArquivo(pasta.pdfFileId!, pdfPath);
+          const pdfPath = await exportPropostaComoPdf(
+            pasta.pdfFileId!,
+            pasta.pdfMimeType,
+            pasta.pdfFileName!,
+            clientTempDir,
+          );
 
           // Dados do cliente: qualquer formato → salvo como .txt
           const txtPath = path.join(clientTempDir, 'dados_cliente.txt');

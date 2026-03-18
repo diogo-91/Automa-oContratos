@@ -11,23 +11,43 @@ export interface GoogleDriveClientFolder {
   clientName:     string;
   pdfFileId:      string | null;
   pdfFileName:    string | null;
+  pdfMimeType:    string;    // mimeType real do arquivo de proposta
   txtFileId:      string | null;
   txtFileName:    string | null;
   txtMimeType:    string;    // mimeType real do arquivo de dados do cliente
   isReady:        boolean;
 }
 
-// Formatos aceitos como arquivo de dados do cliente
-const MIME_GOOGLE_DOC  = 'application/vnd.google-apps.document';
-const MIME_DOCX        = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const MIME_PDF         = 'application/pdf';
+// Formatos aceitos
+const MIME_GOOGLE_DOC    = 'application/vnd.google-apps.document';
+const MIME_GOOGLE_SLIDES = 'application/vnd.google-apps.presentation';
+const MIME_DOCX          = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_PPTX          = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const MIME_PPT           = 'application/vnd.ms-powerpoint';
+const MIME_DOC           = 'application/msword';
+const MIME_PDF           = 'application/pdf';
+
+function isProposalFile(mimeType: string, name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    mimeType === MIME_PDF            ||
+    mimeType === MIME_GOOGLE_SLIDES  ||
+    mimeType === MIME_PPTX           ||
+    mimeType === MIME_PPT            ||
+    lower.endsWith('.pdf')           ||
+    lower.endsWith('.pptx')          ||
+    lower.endsWith('.ppt')
+  );
+}
 
 function isClientDataFile(mimeType: string, name: string): boolean {
   const lower = name.toLowerCase();
   return (
-    mimeType === MIME_GOOGLE_DOC       ||
-    lower.endsWith('.txt')             ||
-    lower.endsWith('.docx')            ||
+    mimeType === MIME_GOOGLE_DOC     ||
+    mimeType === MIME_DOCX           ||
+    mimeType === MIME_DOC            ||
+    lower.endsWith('.txt')           ||
+    lower.endsWith('.docx')          ||
     lower.endsWith('.doc')
   );
 }
@@ -145,6 +165,7 @@ export async function verificarPastaCliente(
 
   let pdfFileId:   string | null = null;
   let pdfFileName: string | null = null;
+  let pdfMimeType: string        = '';
   let txtFileId:   string | null = null;
   let txtFileName: string | null = null;
   let txtMimeType: string        = '';
@@ -152,13 +173,12 @@ export async function verificarPastaCliente(
   for (const file of files) {
     if (!file.id || !file.name || !file.mimeType) continue;
 
-    const lower = file.name.toLowerCase();
-
-    if (file.mimeType === MIME_PDF || lower.endsWith('.pdf')) {
-      // Proposta PDF (só o primeiro encontrado)
-      if (!pdfFileId) {
+    if (isProposalFile(file.mimeType, file.name)) {
+      // Proposta: PDF tem prioridade; outros formatos aceitos como fallback
+      if (!pdfFileId || file.mimeType === MIME_PDF) {
         pdfFileId   = file.id;
         pdfFileName = file.name;
+        pdfMimeType = file.mimeType;
       }
     } else if (isClientDataFile(file.mimeType, file.name)) {
       // Arquivo de dados do cliente (Google Docs, .docx, .doc, .txt)
@@ -175,11 +195,11 @@ export async function verificarPastaCliente(
   if (!isReady) {
     logger.debug(
       `[drive] Pasta incompleta: "${clientName}" ` +
-      `(PDF: ${pdfFileId ? '✔' : '✘'} | Dados: ${txtFileId ? '✔' : '✘'})`,
+      `(Proposta: ${pdfFileId ? '✔' : '✘'} | Dados: ${txtFileId ? '✔' : '✘'})`,
     );
   }
 
-  return { folderId, clientName, pdfFileId, pdfFileName, txtFileId, txtFileName, txtMimeType, isReady };
+  return { folderId, clientName, pdfFileId, pdfFileName, pdfMimeType, txtFileId, txtFileName, txtMimeType, isReady };
 }
 
 // ─── Download de arquivo ──────────────────────────────────────────────────────
@@ -228,26 +248,38 @@ export async function exportArquivoComoTexto(
     await streamParaArquivo(res.data as NodeJS.ReadableStream, destPath);
 
   } else if (mimeType === MIME_DOCX || mimeType.includes('wordprocessingml')) {
-    // .docx: fazer upload temporário como Google Docs e exportar como texto
-    logger.info(`[drive] Convertendo .docx → texto via Drive: ${path.basename(destPath)}`);
+    // .docx: extrair texto localmente com mammoth (sem consumir cota do Drive)
+    logger.info(`[drive] Convertendo .docx → texto via mammoth: ${path.basename(destPath)}`);
     const downloadPath = destPath + '.docx.tmp';
     await downloadArquivo(fileId, downloadPath);
 
-    const uploadRes = await drive.files.create({
-      requestBody: { name: '_tmp_text_extract', mimeType: MIME_GOOGLE_DOC },
-      media: { mimeType: MIME_DOCX, body: fs.createReadStream(downloadPath) },
-      fields: 'id',
-    });
-    const tempId = uploadRes.data.id!;
     try {
-      const res = await drive.files.export(
-        { fileId: tempId, mimeType: 'text/plain' },
-        { responseType: 'stream' },
-      );
-      await streamParaArquivo(res.data as NodeJS.ReadableStream, destPath);
+      const mammoth = await import('mammoth');
+      const result  = await mammoth.extractRawText({ path: downloadPath });
+      fs.writeFileSync(destPath, result.value, 'utf-8');
     } finally {
       fs.rmSync(downloadPath, { force: true });
-      await drive.files.delete({ fileId: tempId }).catch(() => undefined);
+    }
+
+  } else if (mimeType === MIME_PPTX || mimeType === MIME_PPT || mimeType.includes('presentationml')) {
+    // .pptx/.ppt: extrair texto via LibreOffice
+    logger.info(`[drive] Convertendo apresentação → texto via LibreOffice: ${path.basename(destPath)}`);
+    const downloadPath = destPath + '.pptx.tmp';
+    const ext = mimeType === MIME_PPT ? '.ppt' : '.pptx';
+    const tmpWithExt = downloadPath + ext;
+    await downloadArquivo(fileId, downloadPath);
+    fs.renameSync(downloadPath, tmpWithExt);
+    try {
+      await converterParaTextoLibreOffice(tmpWithExt, path.dirname(destPath));
+      const baseName = path.basename(tmpWithExt).replace(/\.[^.]+$/, '.txt');
+      const txtGerado = path.join(path.dirname(destPath), baseName);
+      if (fs.existsSync(txtGerado)) {
+        fs.renameSync(txtGerado, destPath);
+      } else {
+        fs.writeFileSync(destPath, '', 'utf-8');
+      }
+    } finally {
+      fs.rmSync(tmpWithExt, { force: true });
     }
 
   } else {
@@ -345,6 +377,84 @@ async function exportGoogleDocAsDocx(fileId: string, destPath: string): Promise<
   });
 }
 
+// ─── Helper: executa LibreOffice headless ─────────────────────────────────────
+
+async function getSofficePath(): Promise<string> {
+  const { accessSync, constants } = await import('fs');
+  const candidates = [
+    'C:/Program Files/LibreOffice/program/soffice.exe',
+    'C:/Program Files (x86)/LibreOffice/program/soffice.exe',
+    'soffice',
+  ];
+  for (const c of candidates) {
+    try { accessSync(c, constants.X_OK); return c; } catch { /* tenta próximo */ }
+  }
+  return 'soffice';
+}
+
+async function converterParaTextoLibreOffice(filePath: string, outDir: string): Promise<void> {
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+  const sofficePath = await getSofficePath();
+  await execFileAsync(sofficePath, [
+    '--headless', '--convert-to', 'txt:Text', '--outdir', outDir, filePath,
+  ], { timeout: 60_000 });
+}
+
+// ─── Exportar proposta (qualquer formato) como PDF ────────────────────────────
+
+export async function exportPropostaComoPdf(
+  fileId:   string,
+  mimeType: string,
+  fileName: string,
+  destDir:  string,
+): Promise<string> {
+  const drive    = getDriveClient();
+  const pdfPath  = path.join(destDir, path.basename(fileName).replace(/\.[^.]+$/, '') + '.pdf');
+  fs.mkdirSync(destDir, { recursive: true });
+
+  if (mimeType === MIME_PDF || fileName.toLowerCase().endsWith('.pdf')) {
+    // Já é PDF: download direto
+    await downloadArquivo(fileId, pdfPath);
+
+  } else if (mimeType === MIME_GOOGLE_SLIDES) {
+    // Google Slides: exportar direto como PDF
+    logger.info(`[drive] Exportando Google Slides como PDF: ${fileName}`);
+    const res = await drive.files.export(
+      { fileId, mimeType: MIME_PDF },
+      { responseType: 'stream' },
+    );
+    await streamParaArquivo(res.data as NodeJS.ReadableStream, pdfPath);
+
+  } else {
+    // PPTX, DOCX, etc.: download + LibreOffice → PDF
+    logger.info(`[drive] Convertendo ${path.extname(fileName)} → PDF via LibreOffice: ${fileName}`);
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFile);
+    const sofficePath   = await getSofficePath();
+
+    const tmpPath = path.join(destDir, fileName);
+    await downloadArquivo(fileId, tmpPath);
+
+    try {
+      await execFileAsync(sofficePath, [
+        '--headless', '--convert-to', 'pdf', '--outdir', destDir, tmpPath,
+      ], { timeout: 60_000 });
+    } finally {
+      fs.rmSync(tmpPath, { force: true });
+    }
+
+    if (!fs.existsSync(pdfPath)) {
+      throw new Error(`LibreOffice não gerou o PDF esperado: ${pdfPath}`);
+    }
+  }
+
+  logger.info(`[drive] Proposta pronta como PDF: ${path.basename(pdfPath)}`);
+  return pdfPath;
+}
+
 // ─── Converter .docx → .pdf via LibreOffice (local) ──────────────────────────
 
 export async function converterDocxParaPdf(docxPath: string): Promise<string> {
@@ -357,22 +467,7 @@ export async function converterDocxParaPdf(docxPath: string): Promise<string> {
 
   logger.info(`[drive] Convertendo .docx → .pdf (LibreOffice): ${path.basename(docxPath)}`);
 
-  // Caminhos possíveis do LibreOffice no Windows
-  const candidates = [
-    'C:/Program Files/LibreOffice/program/soffice.exe',
-    'C:/Program Files (x86)/LibreOffice/program/soffice.exe',
-    'soffice',
-  ];
-
-  let sofficePath = 'soffice';
-  for (const c of candidates) {
-    try {
-      const { accessSync, constants } = await import('fs');
-      accessSync(c, constants.X_OK);
-      sofficePath = c;
-      break;
-    } catch { /* tenta próximo */ }
-  }
+  const sofficePath = await getSofficePath();
 
   await execFileAsync(sofficePath, [
     '--headless',
