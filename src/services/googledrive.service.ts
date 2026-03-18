@@ -76,26 +76,43 @@ function getDriveClient(): drive_v3.Drive {
 // ─── Auth: OAuth2 com conta do usuário (upload — usa cota do usuário) ─────────
 
 function getOAuthDriveClient(): drive_v3.Drive | null {
-  const tokenPath    = process.env.GOOGLE_OAUTH_TOKEN_PATH ?? './credentials/google-oauth-token.json';
   const clientId     = process.env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
 
-  if (!clientId || !clientSecret || !fs.existsSync(tokenPath)) {
-    return null;
+  if (!clientId || !clientSecret) return null;
+
+  // Prioridade 1: variável de ambiente GOOGLE_OAUTH_TOKEN (JSON stringificado)
+  // Prioridade 2: arquivo no disco
+  let tokens: Record<string, unknown> | null = null;
+  let tokenPath: string | null = null;
+
+  if (process.env.GOOGLE_OAUTH_TOKEN) {
+    try {
+      tokens = JSON.parse(process.env.GOOGLE_OAUTH_TOKEN);
+    } catch {
+      logger.warn('[drive] GOOGLE_OAUTH_TOKEN inválido (JSON malformado)');
+      return null;
+    }
+  } else {
+    tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH ?? './credentials/google-oauth-token.json';
+    if (!fs.existsSync(tokenPath)) return null;
+    tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
   }
 
-  const tokens      = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
   const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI ?? 'http://localhost:3000/oauth/callback';
   const oauthClient = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
-  oauthClient.setCredentials(tokens);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  oauthClient.setCredentials(tokens as any);
 
-  // Persiste novos tokens automaticamente quando o access_token for renovado
+  // Persiste novos tokens quando o access_token for renovado (só se usar arquivo)
   oauthClient.on('tokens', (newTokens) => {
-    if (newTokens.refresh_token) tokens.refresh_token = newTokens.refresh_token;
-    tokens.access_token = newTokens.access_token;
-    tokens.expiry_date  = newTokens.expiry_date;
-    fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2));
-    logger.debug('[drive] OAuth2 token renovado e salvo.');
+    if (newTokens.refresh_token) tokens!.refresh_token = newTokens.refresh_token;
+    tokens!.access_token = newTokens.access_token;
+    tokens!.expiry_date  = newTokens.expiry_date;
+    if (tokenPath) {
+      fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2));
+      logger.debug('[drive] OAuth2 token renovado e salvo em arquivo.');
+    }
   });
 
   return google.drive({ version: 'v3', auth: oauthClient });
